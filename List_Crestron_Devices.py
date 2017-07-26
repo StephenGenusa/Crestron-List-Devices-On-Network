@@ -54,21 +54,24 @@ for iface in netifaces.interfaces():
             print("Testing IP subnet", cur_ip)
             # set the UDP test up
             sock = socket(AF_INET, SOCK_DGRAM)
+            # bind the socket to the local IP:CIP_PORT
             sock.bind((cur_ip, CIP_PORT))
             sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
             sock.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
+            # send the UDP message to the broadcast IP:CIP_PORT
             sock.sendto(UDP_MSG, (BROADCAST_IP, CIP_PORT))
+            # we want an exception to end the while True: loop below, 
+            #   based on the following timeout
             sock.settimeout(1.0)
             try:
-                # we want a timeout exception to end the while True: loop based on timeout
                 while True:
-                    # get the response data
+                    # get a UDP response packet and store in buffer
                     data, addr = sock.recvfrom(4096)
                     # find the device hostname in the response buffer
                     search = re.findall ('\x00([a-zA-Z0-9-]{2,30})\x00', data[9:40])
                     if search:
                         dev_name = search[0]
-                        # get the ipv4 address taken from the sock.recvfrom function
+                        # get the ipv4 address received from sock.recvfrom()
                         dev_ip = addr[0]
                         # find if ver info is part of UDP packet
                         firmware_info = ""
