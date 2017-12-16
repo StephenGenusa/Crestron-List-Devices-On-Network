@@ -40,7 +40,7 @@ import netifaces
 
 
 MAX_RETRIES = 3
-CR = "\r"
+
 BUFF_SIZE = 2000
 CIP_PORT = 41794
 BROADCAST_IP = '255.255.255.255'
@@ -101,6 +101,7 @@ class CrestronDeviceFinder(object):
             self.sock.connect(server_address)
             return True
         except:
+            #print ("exception thrown:", sys.exc_info()[0])
             pass
         return False
 
@@ -122,39 +123,53 @@ class CrestronDeviceFinder(object):
         data = ""
         for _unused in range(0, MAX_RETRIES):
             try:
-                self.sock.sendall(CR)
-                data += self.sock.recv(BUFF_SIZE)
-                sleep(.25)
-                search = re.findall("[\n\r]([\w-]{3,30})>", data, re.MULTILINE)
-                if search:
-                    self.console_prompt = search[0]
-                    print("{0} \t is a {1}".format(self.device_ip_address, self.console_prompt))
-                    return True
-            except:
+                self.sock.settimeout(30.0)
+                for cr in ["\r", "\r\n"]:
+                    self.sock.sendall(cr)
+                    sleep(.25)
+                    data += self.sock.recv(BUFF_SIZE)
+                    search = re.findall("[\n\r]([\w-]{3,30})>", data, re.MULTILINE)
+                    if search:
+                        self.console_prompt = search[0]
+                        return True
+            except Exception as e:
                 pass
             return False
 
 
+    def ip_responding_to_ping(self, ip_addr, attempts, limbo):
+        wait_time = 100
+        for _ in range(0, attempts):
+            if not subprocess.Popen(["ping", "-n", "1", "-w", str(wait_time), ip_addr], stdout=limbo, stderr=limbo).wait():
+                return True
+            wait_time += 100
+
+            
     def show_devices_using_icmp(self, subnet):
         """
         Build a list of devices that respond to ping for a /24 subnet like 17.1.6.{1}:
         """
-        print ("Building list of active IP addresses on subnet {0}.0/24\nPlease wait. This will take about two minutes...".format(subnet))
+        print ("Building list of active IP addresses on subnet {0}.0/24\nPlease wait. This will take about a few minutes depending on how many devices are found...".format(subnet))
         with open(os.devnull, "wb") as limbo:
             for last_octet in xrange(1, 255):
                 ip = "{0}.{1}".format(subnet, last_octet)
-                result=subprocess.Popen(["ping", "-n", "1", "-w", "200", ip],
-                        stdout=limbo, stderr=limbo).wait()
-                if not result:
+                if self.ip_responding_to_ping(ip, 3, limbo):
                     self.active_ips_to_check.append(ip)
                 self.print_progress (last_octet, 254, bar_length = 70)
-            if self.active_ips_to_check:
-                print("Located {0} active IPs on subnet. Now testing for console on each IP.".format(len(self.active_ips_to_check)))
-                for self.device_ip_address in self.active_ips_to_check:
+            if self.active_ips_to_check:            
+                print("\nLocated {0} active IPs on subnet. Now testing for console on each IP.".format(len(self.active_ips_to_check)))
+                self.active_ips_len = len(self.active_ips_to_check)
+                for index, self.device_ip_address in enumerate(self.active_ips_to_check):
+                    item_pos = "(" + str(index + 1) + "/" + str(self.active_ips_len) + ")"
                     if self.open_device_connection():
                         if self.get_console_prompt():
-                            print((FORMATTING + self.console_prompt + " located at " + self.device_ip_address).ljust(35))
-                        self.close_device_connection()
+                            print(FORMATTING + self.console_prompt.ljust(30) + str(" located at " + self.device_ip_address).ljust(25), item_pos)
+                            self.close_device_connection()
+                        else:
+                            print(FORMATTING + "Console not found on", self.device_ip_address)
+                    else:
+                        print(FORMATTING + "N/A - No CIP".ljust(30) +  str(" located at " + self.device_ip_address).ljust(25), item_pos)
+                    sys.stdout.flush()
 
 
     def show_devices_using_udp(self):
